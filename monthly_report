@@ -1,0 +1,220 @@
+from slackclient import SlackClient
+import time
+import os
+import sys
+import datetime
+from dateutil.relativedelta import relativedelta
+
+servers = ("fd2a", "ff1a", "hh3b", "kw1a", "kw1b", "lo8a", "os5a", "os5b", "sg2a", "sg2b", 'sy1a', 'va1a', 'va1b')
+types = ("", "nfs", "cluster")
+
+currser = "d"
+currtype = ""
+used = {}
+total = {}
+available = {}
+ts = 0
+
+dir_name = "data"
+
+
+def savedata(dir_path, filename, data):
+    f = open(dir_path + filename, "w")  # opens file with name of "test.txt"
+    print(dir_path + filename)
+    f.write(data)
+    f.close()
+
+
+def reset_data():
+    print("datareset")
+    for i in range(0, len(servers)):
+        for j in range(0, len(types)):
+            used[servers[i] + types[j]] = 0
+            total[servers[i] + types[j]] = 0
+            available[servers[i] + types[j]] = 0
+
+
+def write_data(ts):
+    datastr = ''
+    global used
+    global total
+    ttotaltotalsum = 0
+
+    for j in range(0, len(types)):
+
+        datastr += types[j] + '\n'
+        datastr += "Name\t" + "Region\t" + "total(TB)\t" + "used(TB)\t" + "available(TB)\t" + "Used(%)\n"
+        for i in range(0, len(servers)):
+            tused = used[servers[i] + types[j]]
+            ttotal = total[servers[i] + types[j]]
+            ttotaltotalsum += ttotal
+            if (ttotal != 0):
+                datastr += (
+                    servers[i][0:len(servers[i]) - 1] + "\t\t" +
+                    servers[i][len(servers[i]) - 1] + "\t\t" +
+
+                    "{:.1f}".format(ttotal / 1024) + " \t\t" +
+                    "{:.1f}".format(tused / 1024) + " \t\t" +
+                    "{:.1f}".format((ttotal - tused) / 1024) +
+                    "{:.1f}".format(tused / ttotal * 100) + " \t\t" +
+
+                    "  \n")
+
+    print("..")
+    if (ttotaltotalsum > 0):
+        hour= datetime.datetime.fromtimestamp(int(ts)).hour
+        day=  datetime.datetime.fromtimestamp(int(ts)).day
+
+        month=  datetime.datetime.fromtimestamp(int(ts)).month
+        year=datetime.datetime.fromtimestamp(int(ts)).year
+
+
+        if hour < 12:
+            savedata("data/", "Storage-Update-M-" +
+                     str(day) + "-" +
+                     str(month) + "-" +
+                     str(year) + ".txt", datastr)
+        else:
+            savedata("data/", "Storage-Update-E-" +
+                     str(day) + "-" +
+                     str(month) + "-" +
+                     str(year) + ".txt", datastr)
+
+
+def parse(text):
+    global currser
+    global currtype
+    global used
+    global total
+    global available
+    global ts
+
+    content = text.split("\n")
+
+    for line in content:
+        line = line[:len(line)]
+
+        if line.__contains__("Netapp Cluster"):
+            for server in servers:
+
+                if line.__contains__(server):
+                    currser = server
+                    for type in types:
+                        if line.__contains__(type):
+                            currtype = type
+
+
+                            # print(line)
+
+        if line.__contains__("Total available capacity"):
+            # print(line)
+
+            # print ("contains","Total available capacity------")
+
+            elements = line.split(":")
+            # print (elements)
+            size = float(elements[1])
+            # print(size)
+            total[currser + currtype] += size
+            # print(size,"TOTAL capacity",total)
+
+        elif line.__contains__("size provisioned"):
+            # print(line)
+
+            # print("contains", "Total   LUN    size  provisioned------- ")
+            elements = line.split(":")
+            # print(elements)
+            size = float(elements[1])
+            # print(size)
+            used[currser + currtype] += size
+            # print(size, "Used", used)
+
+    # print( currser)
+    # print( currtype)
+    # print(    used)
+    # print(total)
+    # print(available)
+    return (used, total)
+
+
+def make_dir(dir_name):
+    if not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+
+
+def main():
+    slack_token = "xoxp-4188758260-214448774358-247480007188-634f9e46f72262a7f952eaf56ac210a9"
+    channel_name = 'storage_sdp_prod_mon'
+    time_on_last_message = time.time()
+    channel_id = ""
+    ts = 0.000
+    threshmins = 20
+    channels_call = SlackClient(slack_token).api_call("channels.list")
+    print(channels_call)
+
+    print(channels_call.keys())
+
+    for channel in channels_call["channels"]:
+        if channel["name"] == channel_name:
+            channel_id = channel["id"]
+            print(channel)
+
+    make_dir(dir_name)
+    print(channel_id)
+    reset_data()
+    time_since_last_update = time.time() - time_on_last_message
+    print("Waiting for new data....", time.time() - time_on_last_message)
+    if time_since_last_update > threshmins * 60:
+        write_data(ts)
+
+        reset_data()
+
+    sc = SlackClient(slack_token)
+
+    date_after_month = datetime.datetime.now() + relativedelta(months=-1)
+    date_after_month=date_after_month.timestamp()
+    while True:
+        breakflag=0
+        data = sc.api_call(
+            "channels.history",
+            channel=channel_id,
+            oldest=date_after_month,
+            count=1000,
+        )
+
+        if (data['ok'] == True):
+            messages = data['messages']
+
+            for message in reversed(messages):
+                # print(message['ts'])
+                if float(message['ts']) > ts:
+                    print("difference=", float(message['ts']) - ts)
+                    if float(message['ts']) - ts > (threshmins * 60):
+                        print("greater diffrrece>reset................")
+                        write_data(ts)
+                        print(ts)
+
+                        reset_data()
+
+                    time_on_last_message = time.time()
+
+                    ts = float(message['ts'])
+
+                    parse(message['text'])
+
+                if (data["has_more"] == True):
+                    print("has more")
+                    date_after_month=message['ts']
+                else:
+                    breakflag=1
+
+
+        else:
+            print("No data returned or error")
+
+        time.sleep(1)  # in Seconds
+        if(breakflag==1):
+            break
+
+
+main()
