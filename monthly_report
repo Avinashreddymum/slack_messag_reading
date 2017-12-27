@@ -143,8 +143,8 @@ def make_dir(dir_name):
 
 
 def main():
-    slack_token = "xoxp-4188758260-214448774358-247480007188-634f9e46f72262a7f952eaf56ac210a9"
-    channel_name = 'storage_sdp_prod_mon'
+    slack_token = "xoxpApi-Toekn"
+    channel_name = 'Channel'
     time_on_last_message = time.time()
     channel_id = ""
     ts = 0.000
